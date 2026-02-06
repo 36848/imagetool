@@ -170,8 +170,8 @@ def dms_to_decimal(dms_str: str) -> float:
 if __name__ == "__main__":
     # 你可以更改这些参数：
    
-    lat_dms = '52°55\'44.1"N' #Latitude经度
-    lon_dms = '9°20\'46.5"W' #Longitude纬度
+    lat_dms = '53°52\'26.7"N' #Latitude经度
+    lon_dms = '7°10\'22.3"W' #Longitude纬度
 
     #  转换为十进制度
     lat = dms_to_decimal(lat_dms)
@@ -182,8 +182,8 @@ if __name__ == "__main__":
     zoom = 15    #地图缩放等级 13.14.15 =15
     half_range = 5  #  范围area Map Zoom Level 1 2  3 5 10
 
-    tile_dir = f"./tiles/zzz{zoom}" # need change name
-    output_image = f"./output/merged_zzz{zoom}.png"
+    tile_dir = f"./tiles/a{zoom}" # need change name
+    output_image = f"./output/merged_a{zoom}.png"
 
     # 步骤 1：计算瓦片范围
     tile_range = calculate_tile_range(lat, lon, zoom, half_range)

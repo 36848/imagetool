@@ -1,3 +1,6 @@
 # Ignore output tiles
 output/
 tiles/
+
+# Ingore env
+.env
