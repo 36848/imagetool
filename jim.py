@@ -20,22 +20,21 @@ from PIL import Image
 # 🔧🔧🔧 手动配置区（你只需要修改这里） 🔧🔧🔧
 # ============================================================
 
-ACCESS_KEY = "1770310977_4654790101657753386_%2F_zTQ3u5D2b55P3wb0%2Fxi47O6AgB6RKTFyoN4Op%2BB5ibI%3D"
+ACCESS_KEY = "1770634203_1864761183818928198_%2F_JAa50YazV0S5a%2FQbyEt15UTLeDMvd7KikZmUAUkTV8g%3D"
 
-ZOOM = 20                     # 瓦片缩放级别
-MIN_LON, MIN_LAT = -7.07 ,52.20  # 左下角（经纬度）
-MAX_LON, MAX_LAT = -7.05 ,52.18  # 右上角（经纬度）52.185437121388404, -7.059602755044289
-
+ZOOM = 19                     # z
+MIN_LAT, MIN_LON  = 53.36297828726348, -6.248149349652652 # 左下角（经纬度）
+MAX_LAT, MAX_LON  = 53.36519002004783, -6.241323388028519  # 右上角（经纬度）
 OUT_DIR = "tiles_z14"        # 下载的瓦片保存到此文件夹
-OUTPUT_IMAGE = "ireland_satellite_z14.png"   # 拼接结果图像
+OUTPUT_IMAGE = "satellite_z14.png"   # 拼接结果图像
 
 # Apple Maps tile 参数（一般不需要改）
 TILE_SIZE = 256
 APPLE_TILE_HOST = "https://sat-cdn.apple-mapkit.com"
-APPLE_TILE_STYLE = 7
-APPLE_TILE_SIZE_PARAM = 1
-APPLE_TILE_SCALE = 1
-APPLE_TILE_VERSION = 10311
+APPLE_TILE_STYLE = 7          #style
+APPLE_TILE_SIZE_PARAM = 1     # size
+APPLE_TILE_SCALE = 1          #scale
+APPLE_TILE_VERSION = 10311    #v
 
 # 下载相关参数
 REQUEST_TIMEOUT = 20
