@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Overview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- Leaflet & Draw -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css">
+
+<style>
+  html, body, #map { height: 100%; margin: 0; }
+  .panel {
+    position: absolute; right: 10px; top: 10px; z-index: 1000;
+    width: 380px; background: #fff; padding: 12px; border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.15); font-family: system-ui,sans-serif;
+  }
+  .row { margin: 6px 0; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-line; }
+  button { padding: 8px 12px; border-radius: 6px; border: 1px solid #ddd; cursor: pointer; }
+  #preview { max-width: 100%; margin-top: 8px; display: none; border: 1px solid #eee; }
+  progress { width: 100%; }
+</style>
+</head>
+
+<body>
+<div id="map"></div>
+
+<div class="panel">
+
+  <div class="row"><b>Steps：</b>① Search for a location → ② Select (box) the area → ③ Choose the zoom level → ④ Download </div>
+
+  <!--  搜索框加入在这里 -->
+  <div class="row">
+    <input id="searchBox" type="text" placeholder="  " style="width:200px;">
+    <button id="btnSearch">Search </button>
+  </div>
+  <div id="searchResult" class="mono"></div>
+
+  <div class="row">
+    Zoom：
+    <input id="zoom" type="number" value="14" min="0" max="19" style="width: 80px">
+   
+    Delay (ms/tile):
+    <input id="delay" type="number" value="150" min="0" style="width: 80px">
+
+   
+  </div>
+
+  <div class="row">
+    <button id="btnRun">Download</button>
+    <button id="btnSave" disabled>Save PNG</button>
+  </div>
+
+  <div class="row mono" id="coords"> </div>
+  <div class="row">
+    <progress id="prog" value="0" max="100" hidden></progress>
+  </div>
+
+  <img id="preview" alt="Preview Image">
+</div>
+
+<!-- Leaflet & Draw JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+
+<script>
+/* =============== 地图初始化 =============== */
+const map = L.map('map').setView([53.3498, -6.2603], 14);
+
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: "&copy; OpenStreetMap contributors"
+}).addTo(map);
+
+const group = new L.FeatureGroup().addTo(map);
+
+map.addControl(new L.Control.Draw({
+  draw: { polygon:false, polyline:false, circle:false, marker:false, circlemarker:false, rectangle:true },
+  edit: { featureGroup: group }
+}));
+
+let bounds = null;
+const $coords = document.getElementById("coords");
+
+/* =============== 框选事件 =============== */
+map.on(L.Draw.Event.CREATED, e => {
+  group.clearLayers();
+  const layer = e.layer;
+  group.addLayer(layer);
+
+  bounds = layer.getBounds();
+  const sw = bounds.getSouthWest();
+  const ne = bounds.getNorthEast();
+
+  $coords.textContent =
+`MIN_LAT, MIN_LON = ${sw.lat}, ${sw.lng}
+MAX_LAT, MAX_LON = ${ne.lat}, ${ne.lng}`;
+});
+
+/* =============== 搜索地点功能 =============== */
+document.getElementById("btnSearch").onclick = async () => {
+  const query = document.getElementById("searchBox").value.trim();
+  const $result = document.getElementById("searchResult");
+
+  if (!query) {
+    $result.textContent = "";
+    return;
+  }
+
+  $result.textContent = "searching …";
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`;
+    const res = await fetch(url, { headers: { "Accept-Language": "en" }});
+    const data = await res.json();
+
+    if (!data.length) {
+      $result.textContent = "The location was not found.";
+      return;
+    }
+
+    const place = data[0];
+    const lat = parseFloat(place.lat);
+    const lon = parseFloat(place.lon);
+
+    map.setView([lat, lon], 16);
+
+    $result.textContent =
+`${place.display_name}
+→ lat = ${lat}
+→ lon = ${lon}`;
+  }
+  catch(err) {
+    $result.textContent = "Search failed：" + err;
+  }
+};
+
+/* =============== 瓦片坐标转换工具 =============== */
+function latLonToTileXY(lat, lon, z){
+  const latRad = lat * Math.PI / 180;
+  const n = Math.pow(2, z);
+  return {
+    x: (lon + 180) / 360 * n,
+    y: (1 - Math.log(Math.tan(latRad) + 1/Math.cos(latRad)) / Math.PI) / 2 * n
+  };
+}
+function tileXYToPixelXY(x, y){ return { px: x * 256, py: y * 256 }; }
+
+/* =============== 图片加载工具（带 CORS） =============== */
+const TILE_URL = (z, x, y) => `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function fetchImage(src){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Loading failed " + src));
+    img.src = src;
+  });
+}
+
+/* =============== 核心：拼接并按经纬度裁切 =============== */
+async function stitchAreaToCanvas(minLat, minLon, maxLat, maxLon, zoom, delayMs, onProgress){
+  const pSW = latLonToTileXY(minLat, minLon, zoom);
+  const pNE = latLonToTileXY(maxLat, maxLon, zoom);
+
+  const minX = Math.floor(pSW.x);
+  const maxX = Math.floor(pNE.x);
+  const minY = Math.floor(pNE.y);
+  const maxY = Math.floor(pSW.y);
+
+  const tilesW = maxX - minX + 1;
+  const tilesH = maxY - minY + 1;
+
+  const fullCanvas = document.createElement("canvas");
+  fullCanvas.width = tilesW * 256;
+  fullCanvas.height = tilesH * 256;
+  const ctx = fullCanvas.getContext("2d");
+
+  const total = tilesW * tilesH;
+  let done = 0;
+
+  for (let x = minX; x <= maxX; x++){
+    for (let y = minY; y <= maxY; y++){
+      const url = TILE_URL(zoom, x, y);
+      try {
+        const img = await fetchImage(url);
+        ctx.drawImage(img, (x-minX)*256, (y-minY)*256);
+      } catch {}
+      done++;
+      onProgress?.(Math.round(done*100/total));
+      if (delayMs > 0) await sleep(delayMs);
+    }
+  }
+
+  const originX = (pSW.x - minX)*256;
+  const originY = (pNE.y - minY)*256;
+  const cropW = (pNE.x - minX)*256 - originX;
+  const cropH = (pSW.y - minY)*256 - originY;
+
+  const outCanvas = document.createElement("canvas");
+  outCanvas.width = cropW;
+  outCanvas.height = cropH;
+  outCanvas.getContext("2d").drawImage(fullCanvas, originX, originY, cropW, cropH, 0, 0, cropW, cropH);
+
+  return outCanvas;
+}
+
+/* =============== 下载 + 拼接按钮 =============== */
+const $btnRun = document.getElementById("btnRun");
+const $btnSave = document.getElementById("btnSave");
+const $zoom = document.getElementById("zoom");
+const $delay = document.getElementById("delay");
+const $prog = document.getElementById("prog");
+const $preview = document.getElementById("preview");
+
+let lastCanvas = null;
+
+$btnRun.onclick = async () => {
+  if (!bounds){ alert("Please select the area first"); return; }
+
+  const sw = bounds.getSouthWest();
+  const ne = bounds.getNorthEast();
+  const z = parseInt($zoom.value);
+  const delayMs = parseInt($delay.value)||0;
+
+  $prog.hidden = false; $prog.value = 0;
+  $btnRun.disabled = true;
+
+  try{
+    lastCanvas = await stitchAreaToCanvas(sw.lat, sw.lng, ne.lat, ne.lng, z, delayMs, p => $prog.value=p);
+    $preview.src = lastCanvas.toDataURL("image/png");
+    $preview.style.display = "block";
+    $btnSave.disabled = false;
+  }
+  catch(e){ alert(e.message); }
+
+  $btnRun.disabled = false;
+  $prog.hidden = true;
+};
+
+/* =============== 保存 PNG =============== */
+$btnSave.onclick = () => {
+  if (!lastCanvas) return;
+  const a = document.createElement("a");
+  a.download = `osm_${Date.now()}.png`;
+  a.href = lastCanvas.toDataURL("image/png");
+  a.click();
+};
+</script>
+
+</body>
+</html>
