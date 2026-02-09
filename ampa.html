@@ -113,6 +113,10 @@
     <div id="sidebar">
         <h2>🍎 satellites.pro</h2>
 
+        <label>SEARCH</label>
+        <input id="searchInput" placeholder="Dublin">
+        <button onclick="searchLocation()">Search</button>
+
         <label>STYLE</label>
         <input id="style" type="number" value="7">
 
@@ -145,7 +149,7 @@
 
         <div id="canvas-container">
             <canvas id="canvas"></canvas>
-            <button onclick="exportPNG()">Import PNG</button>
+            <button onclick="exportPNG()">Export PNG</button>
 
         </div>
     </div>
@@ -187,15 +191,51 @@
             return [Math.floor(x), Math.floor(y)];
         }
 
+        async function searchLocation() {
+            const q = document.getElementById("searchInput").value.trim();
+            if (!q) {
+                showNotice("请输入地点名称！", "error");
+                return;
+            }
+
+            // 使用免费 OSM Nominatim API
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`;
+
+            try {
+                const res = await fetch(url, {
+                    headers: { "User-Agent": "SatellitesPro-Client" }
+                });
+                const data = await res.json();
+
+                if (!data || data.length === 0) {
+                    showNotice("error！", "error");
+                    return;
+                }
+
+                // 取第一个结果
+                const lat = parseFloat(data[0].lat);
+                const lon = parseFloat(data[0].lon);
+
+                // 地图移动到搜索位置
+                map.setView([lat, lon], 17);
+
+                showNotice(`已定位到：${data[0].display_name}`, "info");
+
+            } catch (e) {
+                showNotice("搜索失败，请检查网络或稍后再试。", "error");
+                console.error(e);
+            }
+        }
+
         async function startDownload() {
 
             document.getElementById("errorBox").style.display = "none";
             document.getElementById("errorBox").innerHTML = "";
 
-          
+
             const accessKey = document.getElementById("accessKey").value.trim();
-            
-            
+
+
             const zoom = +document.getElementById("zoom").value;
 
             const style = +document.getElementById("style").value;
