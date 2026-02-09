@@ -9,3 +9,6 @@ go to link for more details
   satellitescraper
 
   https://pypi.org/project/satellitescraper/
+
+
+强制刷新 Ctrl + Shift + R
