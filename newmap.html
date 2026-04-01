@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Apple Tile Downloader (Polygon + JPG Export Fixed)</title>
+
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Leaflet Draw CSS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+
+<!-- Leaflet Draw JS -->
+<script src="https://cdn.jsdelivr.net/npm/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+
+<style>
+body {
+    margin: 0;
+    font-family: "Segoe UI", Arial, sans-serif;
+    display: flex;
+    height: 100vh;
+}
+
+/* 左侧面板 */
+#sidebar {
+    width: 320px;
+    background: #f3f4f6;
+    padding: 20px;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+}
+#sidebar h2 { margin-top: 0; }
+#sidebar label { margin-top: 12px; display: block; font-size: 13px; font-weight: bold; }
+#sidebar input {
+    width: 100%;
+    padding: 8px;
+    margin-top: 4px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+}
+button {
+    margin-top: 15px;
+    width: 100%;
+    padding: 10px;
+    background: #3a404d;
+    color: white;
+    border: none;
+    border-radius: 6px;
+}
+button:hover { background: #2e2f30; }
+
+/* 主内容 */
+#content { flex: 1; display: flex; flex-direction: column; }
+#map { flex: 1; }
+
+#canvas-container {
+    margin-top: 15px;
+    padding: 10px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    max-height: 300px;
+    overflow: auto;
+}
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+    <h2> Tile Downloader</h2>
+
+    <label>SEARCH</label>
+    <input id="searchInput" placeholder="Dublin">
+    <button onclick="searchLocation()">Search</button>
+
+    <label>STYLE</label>
+    <input id="style" type="number" value="7">
+
+    <label>SIZE</label>
+    <input id="sizeParam" type="number" value="1">
+
+    <label>SCALE</label>
+    <input id="scale" type="number" value="1">
+
+    <label>ZOOM</label>
+    <input id="zoom" type="number" value="19">
+
+    <label>VERSION</label>
+    <input id="version" type="number" value="10311">
+
+    <label>ACCESS_KEY</label>
+    <input id="accessKey">
+
+    <button onclick="startDownload()">Download</button>
+
+    <p id="status"></p>
+
+    <div id="canvas-container">
+        <canvas id="canvas"></canvas>
+        <button onclick="exportPNG()">Export PNG</button>
+        <button onclick="exportJPG()">Export JPG</button>
+    </div>
+</div>
+
+<div id="content">
+    <div id="map"></div>
+</div>
+
+<script>
+// 初始化地图
+const map = L.map('map').setView([53.364, -6.244], 17);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+
+const drawnItems = new L.FeatureGroup();
+map.addLayer(drawnItems);
+
+new L.Control.Draw({
+    draw: {
+        rectangle: true,
+        polygon: true,
+        polyline: false,
+        circle: false,
+        marker: false,
+        circlemarker: false
+    },
+    edit: { featureGroup: drawnItems }
+}).addTo(map);
+
+let selectedShape = null;
+
+map.on(L.Draw.Event.CREATED, function (ev) {
+    drawnItems.clearLayers();
+    drawnItems.addLayer(ev.layer);
+    selectedShape = ev.layer;
+});
+
+// 🔥 修复 contains：实现点在多边形内算法
+function pointInPolygon(point, vs) {
+    const x = point.lng, y = point.lat;
+    let inside = false;
+
+    for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        const xi = vs[i].lng, yi = vs[i].lat;
+        const xj = vs[j].lng, yj = vs[j].lat;
+
+        const intersect = ((yi > y) !== (yj > y)) &&
+            (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+function lonLatToTile(lon, lat, zoom) {
+    const x = (lon + 180) / 360 * Math.pow(2, zoom);
+    const y = (1 - Math.log(Math.tan(lat * Math.PI / 180)
+        + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom);
+    return [Math.floor(x), Math.floor(y)];
+}
+
+function tileXYToLatLon(x, y, zoom) {
+    const n = Math.pow(2, zoom);
+    const lon = x / n * 360 - 180;
+    const latRad = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n)));
+    return L.latLng(latRad * 180 / Math.PI, lon);
+}
+
+async function searchLocation() {
+    const q = document.getElementById("searchInput").value.trim();
+    if (!q) return;
+
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`;
+    const res = await fetch(url, { headers: { "User-Agent": "TileDownloader" } });
+    const data = await res.json();
+    if (!data.length) return alert("无法找到该地点");
+
+    map.setView([parseFloat(data[0].lat), parseFloat(data[0].lon)], 17);
+}
+
+async function startDownload() {
+    if (!selectedShape) return alert("请先绘制区域！");
+
+    const accessKey = document.getElementById("accessKey").value.trim();
+    const zoom = +document.getElementById("zoom").value;
+    const style = +document.getElementById("style").value;
+    const sizeParam = +document.getElementById("sizeParam").value;
+    const scale = +document.getElementById("scale").value;
+    const version = +document.getElementById("version").value;
+
+    const bounds = selectedShape.getBounds();
+
+    const [xMin, yMax] = lonLatToTile(bounds.getWest(), bounds.getSouth(), zoom);
+    const [xMax, yMin] = lonLatToTile(bounds.getEast(), bounds.getNorth(), zoom);
+
+    const width = (xMax - xMin + 1) * 256;
+    const height = (yMax - yMin + 1) * 256;
+
+    const canvas = document.getElementById("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+
+    let downloaded = 0;
+    const status = document.getElementById("status");
+
+    const polygonLatLngs =
+        selectedShape instanceof L.Polygon
+        ? selectedShape.getLatLngs()[0]
+        : null;
+
+    for (let x = xMin; x <= xMax; x++) {
+        for (let y = yMin; y <= yMax; y++) {
+
+            // ✅ polygon 内判断（替换 contains）
+            if (polygonLatLngs) {
+                const center = tileXYToLatLon(x + 0.5, y + 0.5, zoom);
+                if (!pointInPolygon(center, polygonLatLngs)) continue;
+            }
+
+            const url =
+                "https://apple-proxy.yu-xia.workers.dev/" +
+                `?style=${style}&size=${sizeParam}&scale=${scale}` +
+                `&z=${zoom}&x=${x}&y=${y}&v=${version}&accessKey=${accessKey}`;
+
+            try {
+                const img = await loadImage(url);
+                ctx.drawImage(img, (x - xMin) * 256, (y - yMin) * 256);
+            } catch (e) {
+                console.error("Tile Error: " + url);
+            }
+
+            downloaded++;
+            status.innerText = `Downloading: ${downloaded}`;
+        }
+    }
+}
+
+function loadImage(src) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "Anonymous";
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+    });
+}
+
+function exportPNG() {
+    const url = document.getElementById("canvas").toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "apple_satellite.png";
+    a.click();
+}
+
+function exportJPG() {
+    const url = document.getElementById("canvas").toDataURL("image/jpeg", 0.92);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "apple_satellite.jpg";
+    a.click();
+}
+</script>
+
+</body>
+</html>
